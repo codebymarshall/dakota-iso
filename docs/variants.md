@@ -36,7 +36,7 @@ The `stable` and `lts` legs were red at the time of the change — `sshpass` got
 | Variant | Live env image | Payload (offline store) | Bootloader | Composefs | Filesystem | State |
 |---|---|---|---|---|---|---|
 | `dakota` | `projectbluefin/dakota-nvidia:stable` | same | systemd-boot | yes | btrfs | active |
-| `utah` | `projectbluefin/utah:testing` | same | grub2 (live ESP systemd-boot, Secure Boot off) | no | btrfs | active (daily schedule 04:00 UTC) |
+| `utah` | `projectbluefin/utah:stable` | same | grub2 (live ESP systemd-boot, Secure Boot off) | no | btrfs | active (monthly schedule, 8th 04:00 UTC) |
 | `bluefin` | `projectbluefin/bluefin-nvidia:stable` | same | grub2 | no | btrfs | retired |
 | `bluefin-lts-hwe` | `projectbluefin/bluefin-lts-hwe-nvidia:stable` | same | grub2 | no | btrfs | retired |
 
