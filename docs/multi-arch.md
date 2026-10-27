@@ -9,8 +9,8 @@ multi-arch (single ISO, both architectures) build.
 - The aarch64 image source this was designed around (`tuna-os/dakota-x13s`)
   no longer exists.
 - `live/src/build-iso.sh` used to carry an unused `--arch` multi-arch mode.
-  It was removed in #200 because nothing produced its inputs; it is
-  recoverable from git history if an aarch64 producer appears.
+  It was removed in #289 (decision in #200) because nothing produced its
+  inputs; it is recoverable from git history if an aarch64 producer appears.
 
 What remains arch-aware in `build-iso.sh`, and costs nothing to keep: it picks
 `BOOTAA64.EFI` or `BOOTX64.EFI` from whatever boot tar it is given, and the
