@@ -1347,6 +1347,27 @@ class TestBuildLiveSquashfs(unittest.TestCase):
                 f"Got: {img.get('filesystem')!r}",
             )
 
+    def test_composefs_images_do_not_offer_xfs(self):
+        """No images.json entry with composefs=true may offer xfs.
+
+        fisherman rejects composeFsBackend on XFS (it needs fs-verity, which
+        XFS lacks), so offering xfs next to composefs fails at install time.
+        """
+        import json
+        for images_json in sorted((REPO / "live" / "src").rglob("images.json")):
+            data = json.loads(images_json.read_text())
+            for img in data.get("images", []):
+                if not img.get("composefs"):
+                    continue
+                offered = [img.get("filesystem"), *img.get("filesystems", [])]
+                self.assertNotIn(
+                    "xfs",
+                    offered,
+                    f"{images_json.relative_to(REPO)} image '{img.get('name')}' "
+                    "sets composefs=true but offers xfs; fisherman rejects "
+                    "composefs on XFS. Offer btrfs or ext4 instead.",
+                )
+
     def test_justfile_lts_filesystem_is_btrfs(self):
         """justfile _filesystem_for must return btrfs for all targets."""
         justfile = REPO / "justfile"
