@@ -9,9 +9,9 @@ This repo produces ISOs for two different OCI store layouts:
 | Variant | `composefs` | OCI store path | squash before embed? |
 |---|---|---|---|
 | `dakota` | `true` | `/var/lib/containers/storage` (VFS) | **yes** — squash to 1 layer |
-| `bluefin`, `bluefin-lts-hwe` | `false` | `/var/lib/containers/oci-store` (OCI layout) | **yes** — squash to 1 layer |
+| `bluefin`, `bluefin-lts-hwe` | `false` | `/usr/lib/containers/storage` (overlay, additionalimagestore) | **no** — keep layers so ostree commit objects survive |
 
-**Both paths squash.** `buildah commit --squash --format oci` for non-composefs; `buildah commit --squash` (VFS) for composefs. Never use `--format oci` without `--squash`.
+Payload preparation lives in one place: `payload_to_oci_archive` in `scripts/payload-oci.sh`, called by both `scripts/iso-sd-boot.sh` and `scripts/build-live-squashfs.sh`. It uses `podman build` only (no buildah): composefs payloads are built with `--squash-all`; non-composefs payloads keep their layers so ostree commit objects survive.
 
 Any change to `justfile` or `scripts/build-live-squashfs.sh` must be tested on **both** a composefs variant (`dakota`) and a non-composefs variant (`bluefin`). The code paths diverge and bugs in one are invisible when testing only the other.
 
@@ -115,9 +115,9 @@ standard CI runner or local disk.
 to get a single merged overlay view and runs `mksquashfs` directly on that mount.
 No per-layer VFS expansion — peak disk usage stays ~6 GB for the live squashfs.
 
-**Local builds** (via `just iso-sd-boot`) use `buildah commit --squash` to squash
-the image to one layer before VFS import. The squash uses `buildah from --pull-never`
-+ `buildah commit --squash` — NOT `podman create --entrypoint ... && podman commit`
+**Local builds** (via `just iso-sd-boot`) squash the payload to one layer before VFS
+import with `podman build --pull=never --squash-all` from a FROM-only Containerfile
+(`scripts/payload-oci.sh`) — NOT `podman create --entrypoint ... && podman commit`
 (the latter corrupts the Entrypoint config, breaking `bootc install`).
 
 ## Source layout: `live/src/`
@@ -181,8 +181,9 @@ The live environment runs the nvidia image. At install time, `bootc-installer`'s
 | `dakota` (composefs) | ~5.5 GB | ~4.5 GB |
 | `bluefin` / `bluefin-lts-hwe` (non-composefs) | ~7 GB | ~6 GB |
 
-If a bluefin ISO is **~12 GB**: the non-composefs OCI embedding is not squashing.
-See "Non-composefs OCI squash" lesson below.
+If a bluefin ISO is **~12 GB**: do not squash the non-composefs payload to shrink it —
+that path keeps its layers on purpose (squashing destroys the ostree commits). Check for
+the payload being embedded twice or a stale store in the squashfs staging tree.
 If a dakota ISO is **~8 GB**: double-embedded store — see `ci.md` lessons.
 
 ### CI uses `SUPERISO_COMPRESSION=release` (2026-06)
@@ -209,8 +210,38 @@ or corrupt ISO that fails to boot. Always use `/var` or an explicit `output_dir`
 
 `podman create --entrypoint /bin/sh && podman commit` modifies the recorded Entrypoint
 in the image config. Dakota/bootc images have no Entrypoint by design; a fake one causes
-`bootc install` to fail with "cannot execute binary file". Always use
-`buildah commit --squash` to squash layers cleanly without touching config.
+`bootc install` to fail with "cannot execute binary file". At the time the fix was
+`buildah commit --squash`, which squashes layers without touching config. Superseded
+by `podman build` (next lesson).
+
+### podman build replaces buildah for the payload squash (2026-10)
+
+buildah cannot be installed on a bootc image-mode host (no Homebrew formula, no
+`rpm-ostree install`), so local ISO builds on Bluefin needed a hand-rolled shim. The
+payload is now prepared by `scripts/payload-oci.sh` with podman alone:
+
+```dockerfile
+FROM <payload>
+COPY bootc-root-mount.toml /usr/lib/bootc/install/00-defaults.toml
+```
+
+built with `podman build --pull=never [--squash-all]` and written out with
+`podman push <tag> oci-archive:<file>:<payload-ref>`.
+
+**Why this is safe where `podman create && podman commit` is not:** a build *inherits*
+the base image config (Entrypoint, Cmd, Env, Labels) from `FROM`; it never runs a
+container with an overridden entrypoint, so nothing rewrites the config. COPY writes the
+file straight to its destination, so no `RUN` step is needed either.
+`tests/test_live_build_invariants.py` rejects `buildah`, `podman create` and
+`podman commit` in the payload scripts. To check a built payload by hand:
+
+```bash
+skopeo inspect --config oci-archive:<payload.oci.tar>:<ref> | jq '.rootfs.diff_ids | length, .config.Entrypoint'
+skopeo inspect --raw oci-archive:<payload.oci.tar>:<ref> | jq '.annotations["ostree.final-diffid"]'
+```
+
+Expect `1` diff_id and the same Entrypoint as the source image (`skopeo inspect --config
+docker://<payload>`).
 
 ### dakota/src/install-flatpaks.sh was dead code (removed 2026-09)
 
@@ -255,13 +286,14 @@ The `iso-sd-boot` recipe in the justfile injects `root-mount-spec = 'LABEL=root'
 building the squashfs. This is safe because fisherman always formats with `-L root`.
 
 If you see `No filesystem uuid found in target root` — check that:
-1. The `.bootc-root-mount.toml` was created in `output/`
-2. The `buildah copy` + `buildah run` steps ran (look for `Squashing` line in build log)
+1. The payload build ran (look for the `Squashing` line and a `COPY bootc-root-mount.toml`
+   step in the build log)
+2. `/usr/lib/bootc/install/00-defaults.toml` in the payload contains `root-mount-spec`
 3. The injected config has no duplicate `[install]` section headers
 
 ### ostree.final-diffid: composefs vs ostree-native images (2026-06)
 
-`buildah commit --squash` produces a **regular filesystem tar** (the merged OS files), not
+Squashing the payload (`podman build --squash-all`) produces a **regular filesystem tar** (the merged OS files), not
 an ostree commit blob.
 
 - **Composefs images** (Dakota): `ostree.final-diffid` must be updated to point to the
@@ -410,6 +442,11 @@ regardless of composefs setting. For bluefin/lts-hwe, the installer looked for
 fisherman: fatal: bootc install: pulling image: podman pull oci:/var/lib/containers/oci-store: exit status 125
 ```
 
+> **Superseded (2026-10):** the squash rules below are historical. Non-composefs payloads
+> now keep their layers (squashing destroys the ostree commits) and buildah is no longer
+> used. See the variant table at the top of this file and "podman build replaces buildah
+> for the payload squash". The composefs branching itself still applies.
+
 **Fix:** `iso-sd-boot` now reads `live/src/<target>/composefs` and branches **before** squash:
 - `composefs=true` → squash to 1 layer → VFS import via skopeo inside installer container
 - `composefs=false` → **squash to 1 layer** → `buildah commit --squash --format oci` →
@@ -474,6 +511,10 @@ Fixed to check `var/lib/containers/oci-store/index.json` instead.
 
 ### Non-composefs OCI must squash to 1 layer before embedding (2026-06-21)
 
+> **Superseded (2026-10):** historical. Non-composefs payloads are no longer squashed —
+> they keep their layers so ostree commit objects survive — and buildah is no longer used.
+> See the variant table at the top of this file.
+
 **What failed:** bluefin and bluefin-lts-hwe ISOs built at 12 GB instead of ~6 GB.
 
 **Why:** `buildah commit --format oci` without `--squash` in the non-composefs path embeds all ~120 OCI layers as individual blobs into `var/lib/containers/oci-store` inside the squashfs. Each layer is ~60–80 MB uncompressed; 120 layers → ~8 GB OCI store inside a ~6 GB rootfs → 12 GB squashfs → 12 GB ISO.
@@ -489,6 +530,10 @@ Squashing reduces the OCI store to a single ~4 GB layer → ~6 GB final ISO.
 **NEVER remove `--squash` from this path.** The dakota (composefs) path squashes for VFS import; the bluefin (non-composefs) path squashes before OCI layout copy. Both paths squash.
 
 ### VFS additionalimagestore requires squashing to prevent storage explosion (2026-06-23)
+
+> **Superseded (2026-10):** historical. The `buildah commit --squash` fix below no longer
+> applies; non-composefs payloads keep their layers and are prepared with `podman build`
+> by `scripts/payload-oci.sh`. See the variant table at the top of this file.
 
 **What failed:** Building `stable` and `lts` ISO targets failed in CI with `no space left on device` (ENOSPC) during the VFS import step of `Build debug ISO`.
 
