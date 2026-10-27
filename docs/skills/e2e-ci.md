@@ -389,6 +389,15 @@ of those forcing settings. `just gui-e2e dakota` then uses the existing plain
 QEMU boot and verification recipes around the guest driver. On a failure,
 retain the driver's tree/log diagnostics and the serial logs.
 
+### Diagnostics tree dump must walk deeper than page classification (2026-10-27)
+
+The installer's page labels sit around depth 22 of its AT-SPI tree, but the
+driver walked only 12 levels, so failure dumps never showed the real page
+(#244). The failure dump now uses `DIAGNOSTICS_MAX_DEPTH = 40`. Page
+classification in `run()` keeps the default depth of 12 on purpose: inactive
+installer pages also report `SHOWING` (#119), so walking deeper there would
+mix hidden pages into classification. Change those two depths independently.
+
 Source: Context7 `/websites/api_pygobject_gnome` confirms the
 `gi.require_version(...); from gi.repository import ...` binding pattern.
 The current GNOME OS image is the authority for the `Atspi` namespace used by
