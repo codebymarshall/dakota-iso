@@ -294,7 +294,7 @@ Runs `pytest tests/ -v` against Python 3.11.
 |---|---|---|
 | `tests/test_live_build_invariants.py` | 32 | Static assertions on `live/Containerfile`, `live/src/build-iso.sh`, `live/src/configure-live.sh`, publish workflows, E2E workflow wiring, and variant config files. Also pins the DEBUG-only SSH guard and publish gating/concurrency. |
 | `tests/test_luks_unlock.py` | 67 | `live/src/luks-unlock.py` routing, passphrase injection key sequences, screenshot parsing, and the `qemu`/`libvirt` unlock state machines (when to type, success vs. emergency-shell exit codes). |
-| `tests/test_multi_arch_iso.py` | 2 | `live/src/build-iso.sh --arch` flag: single-arch backwards compat and two-arch assembly. **Skipped when `xorriso`/`mtools` are absent.** CI installs these tools so the tests run; they are skipped only in local environments lacking them — and the skip message names the exact apt packages to install. |
+| `tests/test_build_iso_assembly.py` | 2 | `live/src/build-iso.sh`: assembles a real ISO from a mock boot tar + squashfs, and rejects unknown flags such as the removed `--arch`. **Skipped when `xorriso`/`mtools` are absent.** CI installs these tools so the tests run; they are skipped only in local environments lacking them — and the skip message names the exact apt packages to install. |
 
 Run locally with:
 ```bash
@@ -658,7 +658,7 @@ enabled, the NVIDIA proprietary driver cannot take over the framebuffer from the
 BIOS, leaving the screen dark even though the system is running fine.
 
 **Fix:** Added `nvidia-drm.modeset=1` to all 4 boot cmdline entries in both files
-(BLS entries, loopback GRUB entries, single-arch and multi-arch paths).
+(BLS entries and loopback GRUB entries).
 
 **Regression test:** `TestBootCmdline::test_live_build_iso_has_nvidia_drm_modeset`
 and `test_dakota_build_iso_has_nvidia_drm_modeset` in `tests/test_live_build_invariants.py`
