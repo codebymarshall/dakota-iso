@@ -128,11 +128,19 @@ fi
 
 if [[ $MOUNTED -eq 1 ]]; then
     # Locate /etc in the deployment.
-    #   composefs/bootc layout: ostree/bootc/deploy/<stateroot>/<checksum>/etc
-    #   classic ostree layout:  ostree/deploy/<stateroot>/deploy/<checksum>/etc
+    #   composefs-native layout: state/deploy/<composefs-hash>/etc
+    #     (bind-mounted at /etc on boot — the same path fisherman's
+    #     DefaultComposeFsDeployEtcDir writes the hostname to).  Checked first:
+    #     composefs-native installs also create an ostree/ directory.
+    #   composefs/bootc layout:  ostree/bootc/deploy/<stateroot>/<checksum>/etc
+    #   classic ostree layout:   ostree/deploy/<stateroot>/deploy/<checksum>/etc
     DEPLOY_ETC=""
-    DEPLOY_ETC=$(find "$MNT/ostree/bootc/deploy" -maxdepth 3 -name etc -type d 2>/dev/null | head -1) \
+    DEPLOY_ETC=$(find "$MNT/state/deploy" -mindepth 2 -maxdepth 2 -name etc -type d 2>/dev/null | head -1) \
         || true
+    if [[ -z "$DEPLOY_ETC" ]]; then
+        DEPLOY_ETC=$(find "$MNT/ostree/bootc/deploy" -maxdepth 3 -name etc -type d 2>/dev/null | head -1) \
+            || true
+    fi
     if [[ -z "$DEPLOY_ETC" ]]; then
         DEPLOY_ETC=$(find "$MNT/ostree/deploy" -maxdepth 4 -name etc -type d 2>/dev/null | head -1) \
             || true
@@ -216,7 +224,13 @@ FWEOF
             echo "==> debug SSH override written (${SSH_UNIT} preset + wants symlink + PermitRootLogin + firewalld ssh zone)"
         fi
     else
-        echo "WARNING: deployment etc/ not found under $MNT/ostree — post-install patches not applied"
+        echo "WARNING: deployment etc/ not found under $MNT/state/deploy or $MNT/ostree — post-install patches not applied"
+        # Show what the installed filesystem does contain so the next layout
+        # change is diagnosable from the CI log alone.
+        echo "==> etc/ directories on the installed root (maxdepth 4):"
+        find "$MNT" -maxdepth 4 -name etc -type d 2>/dev/null || true
+        echo "==> top-level entries on the installed root:"
+        ls -la "$MNT" 2>/dev/null || true
     fi
 
     umount -R "$MNT" || true

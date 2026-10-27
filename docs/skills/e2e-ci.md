@@ -346,6 +346,16 @@ Write a systemd drop-in override during post-install (`scripts/fisherman-install
 
 **Lesson:** when a post-boot invariant can only be observed at runtime (firmware NVRAM state, live kernel cmdline, running daemon output), don't try to approximate it from static files during install — enable a throwaway debug path into the actual booted target instead.
 
+### composefs-native `/etc` lives under `state/deploy/`, not `ostree/` (2026-10-27, #283)
+
+**Symptom:** plain E2E logs `WARNING: deployment etc/ not found under …/ostree — post-install patches not applied`, then `❌ Post-boot assertions SKIPPED: could not reach installed system over SSH`. The hostname patch and the debug-SSH override were never written, so the post-boot assertions above never ran.
+
+**Root cause:** `fisherman-install.sh` only searched `ostree/bootc/deploy` and `ostree/deploy`. A composefs-native install (`bootc install --composefs-backend`) keeps the writable `/etc` at `state/deploy/<composefs-hash>/etc` on the root filesystem — the tree bind-mounted at `/etc` on boot, and the path fisherman's own `DefaultComposeFsDeployEtcDir` writes the hostname to. These installs *also* create an `ostree/` directory, so "ostree/ exists" says nothing about the layout.
+
+**Fix:** search `state/deploy/*/etc` first, then the two `ostree/` layouts. When nothing matches, the script prints every `etc/` within depth 4 plus the root listing, so the next layout change shows up in the CI log.
+
+**Note:** `state/deploy/<hash>/` holds only `etc` (and state), not `usr` — the `ssh.service` vs `sshd.service` probe there falls back to `sshd.service`, which is what dakota ships.
+
 ---
 
 ## Red Flags
