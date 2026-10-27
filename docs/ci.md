@@ -290,16 +290,19 @@ Runs `pytest tests/ -v` against Python 3.11.
 > are `test-luks-install.yml` (LUKS E2E) and `test-plain-install.yml` (plain install E2E).
 > Never claim a change is verified based on `pytest` alone.
 
-| File | Tests | What it checks |
-|---|---|---|
-| `tests/test_live_build_invariants.py` | 32 | Static assertions on `live/Containerfile`, `live/src/build-iso.sh`, `live/src/configure-live.sh`, publish workflows, E2E workflow wiring, and variant config files. Also pins the DEBUG-only SSH guard and publish gating/concurrency. |
-| `tests/test_luks_unlock.py` | 67 | `live/src/luks-unlock.py` routing, passphrase injection key sequences, screenshot parsing, and the `qemu`/`libvirt` unlock state machines (when to type, success vs. emergency-shell exit codes). |
-| `tests/test_multi_arch_iso.py` | 2 | `live/src/build-iso.sh --arch` flag: single-arch backwards compat and two-arch assembly. **Skipped when `xorriso`/`mtools` are absent.** CI installs these tools so the tests run; they are skipped only in local environments lacking them — and the skip message names the exact apt packages to install. |
+Every `tests/test_*.py` file is collected automatically, so this page does not keep a
+per-file list (a hand-maintained table here drifted out of date). To see what is covered,
+browse [`tests/`](../tests/) — most modules open with a docstring saying what they guard — or run
+`pytest tests/ --collect-only -q`.
+
+Some tests skip themselves when optional tooling is missing. For example,
+`tests/test_multi_arch_iso.py` needs `xorriso`/`mtools`; CI installs them so the tests
+run, and the skip message names the apt packages to install locally.
 
 Run locally with:
 ```bash
 sudo apt-get install -y xorriso dosfstools mtools squashfs-tools
-pip install pytest
+pip install pytest PyYAML jsonschema
 pytest tests/ -v
 ```
 
