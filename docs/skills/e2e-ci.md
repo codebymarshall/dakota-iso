@@ -258,7 +258,8 @@ install would complete but the installed system drops to emergency mode on first
 
 **Current state:** All variants (`dakota`, `bluefin`, `bluefin-lts-hwe`) default to
 `filesystem: btrfs` in `images.json` and all E2E recipes. XFS is available only as a
-user-selectable option in the installer UI. `plain-install-qemu` uses `btrfs`.
+user-selectable option in the installer UI, and only for non-composefs variants (fisherman
+rejects composefs on XFS). `plain-install-qemu` uses `btrfs`.
 
 **Why CI didn't catch it initially:**
 1. `plain-install-qemu` hardcoded `"filesystem": "btrfs"` — `mkfs.xfs` was never called in CI
@@ -346,6 +347,16 @@ Write a systemd drop-in override during post-install (`scripts/fisherman-install
 
 **Lesson:** when a post-boot invariant can only be observed at runtime (firmware NVRAM state, live kernel cmdline, running daemon output), don't try to approximate it from static files during install — enable a throwaway debug path into the actual booted target instead.
 
+### composefs-native `/etc` lives under `state/deploy/`, not `ostree/` (2026-10-27, #283)
+
+**Symptom:** plain E2E logs `WARNING: deployment etc/ not found under …/ostree — post-install patches not applied`, then `❌ Post-boot assertions SKIPPED: could not reach installed system over SSH`. The hostname patch and the debug-SSH override were never written, so the post-boot assertions above never ran.
+
+**Root cause:** `fisherman-install.sh` only searched `ostree/bootc/deploy` and `ostree/deploy`. A composefs-native install (`bootc install --composefs-backend`) keeps the writable `/etc` at `state/deploy/<composefs-hash>/etc` on the root filesystem — the tree bind-mounted at `/etc` on boot, and the path fisherman's own `DefaultComposeFsDeployEtcDir` writes the hostname to. These installs *also* create an `ostree/` directory, so "ostree/ exists" says nothing about the layout.
+
+**Fix:** search `state/deploy/*/etc` first, then the two `ostree/` layouts. When nothing matches, the script prints every `etc/` within depth 4 plus the root listing, so the next layout change shows up in the CI log.
+
+**Note:** `state/deploy/<hash>/` holds only `etc` (and state), not `usr` — the `ssh.service` vs `sshd.service` probe there falls back to `sshd.service`, which is what dakota ships.
+
 ---
 
 ## Red Flags
@@ -388,6 +399,15 @@ exposes its tree on the live user's AT-SPI bus. Production ISOs receive none
 of those forcing settings. `just gui-e2e dakota` then uses the existing plain
 QEMU boot and verification recipes around the guest driver. On a failure,
 retain the driver's tree/log diagnostics and the serial logs.
+
+### Diagnostics tree dump must walk deeper than page classification (2026-10-27)
+
+The installer's page labels sit around depth 22 of its AT-SPI tree, but the
+driver walked only 12 levels, so failure dumps never showed the real page
+(#244). The failure dump now uses `DIAGNOSTICS_MAX_DEPTH = 40`. Page
+classification in `run()` keeps the default depth of 12 on purpose: inactive
+installer pages also report `SHOWING` (#119), so walking deeper there would
+mix hidden pages into classification. Change those two depths independently.
 
 Source: Context7 `/websites/api_pygobject_gnome` confirms the
 `gi.require_version(...); from gi.repository import ...` binding pattern.
